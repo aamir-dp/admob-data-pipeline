@@ -1,6 +1,5 @@
 name: 📊 Daily AdMob → BigQuery Export
 
-# Triggers: run daily at 01:00 UTC, and allow manual runs
 on:
   schedule:
     - cron:  '0 1 * * *'
@@ -10,14 +9,13 @@ jobs:
   export:
     runs-on: ubuntu-latest
 
+    # Inject everything here; note publisher ID is now a secret
     env:
-      # AdMob OAuth (Project A)
       ADMOB_CLIENT_ID:      ${{ secrets.ADMOB_CLIENT_ID }}
       ADMOB_CLIENT_SECRET:  ${{ secrets.ADMOB_CLIENT_SECRET }}
       ADMOB_REFRESH_TOKEN:  ${{ secrets.ADMOB_REFRESH_TOKEN }}
-      ADMOB_PUBLISHER_ID:   ${{ vars.ADMOB_PUBLISHER_ID }}
+      ADMOB_PUBLISHER_ID:   ${{ secrets.ADMOB_PUBLISHER_ID }}
 
-      # GCP / Service Account (Project B)
       GCP_PROJECT:          ${{ vars.GCP_PROJECT }}
       GCS_BUCKET_NAME:      ${{ vars.GCS_BUCKET_NAME }}
       BQ_DATASET:           ${{ vars.BQ_DATASET }}
@@ -27,7 +25,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Authenticate to GCP (for GCS & BigQuery)
+      - name: Authenticate to GCP (GCS & BigQuery)
         uses: google-github-actions/auth@v1
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
@@ -42,14 +40,19 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
-            - name: Debug: show Publisher ID
+      # ─── DEBUG STEPS ──────────────────────────────────────────────────────────
+      - name: Dump environment variables
         run: |
-          echo "ADMOB_PUBLISHER_ID='${ADMOB_PUBLISHER_ID}'"
+          echo "=== ENVIRONMENT DUMP ==="
+          env
+      - name: Check ADMOB_PUBLISHER_ID
+        run: |
+          echo "ADMOB_PUBLISHER_ID='$ADMOB_PUBLISHER_ID'"
           if [ -z "$ADMOB_PUBLISHER_ID" ]; then
-            echo "❌ Publisher ID is empty!"
+            echo "❌ ERROR: ADMOB_PUBLISHER_ID is empty or not set!"
             exit 1
           fi
 
-
+      # ─── ACTUAL EXPORT ────────────────────────────────────────────────────────
       - name: Run AdMob export script
         run: python main.py
