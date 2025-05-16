@@ -5,7 +5,7 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
-# Environment variables
+# ─── CONFIG via ENV ────────────────────────────────────────────────────────────
 CLIENT_ID       = os.getenv("ADMOB_CLIENT_ID")
 CLIENT_SECRET   = os.getenv("ADMOB_CLIENT_SECRET")
 REFRESH_TOKEN   = os.getenv("ADMOB_REFRESH_TOKEN")
@@ -28,6 +28,18 @@ def build_service(creds):
     return build("admob", "v1", credentials=creds, cache_discovery=False)
 
 def fetch_mediation(service, account_name, report_date):
+    # Only DATE as time dimension; removed APP_VERSION_NAME
+    dimensions = [
+        "DATE",
+        "APP", "AD_UNIT",
+        "AD_SOURCE", "AD_SOURCE_INSTANCE", "MEDIATION_GROUP",
+        "COUNTRY"
+    ]
+    metrics = [
+        "AD_REQUESTS", "CLICKS", "ESTIMATED_EARNINGS", "IMPRESSIONS",
+        "IMPRESSION_CTR", "MATCHED_REQUESTS", "MATCH_RATE", "OBSERVED_ECPM"
+    ]
+
     spec = {
         "dateRange": {
             "startDate": {
@@ -41,16 +53,8 @@ def fetch_mediation(service, account_name, report_date):
                 "day":   report_date.day,
             },
         },
-        "dimensions": [
-            "DATE",            # only this time dimension
-            "APP", "AD_UNIT",
-            "AD_SOURCE", "AD_SOURCE_INSTANCE", "MEDIATION_GROUP",
-            "COUNTRY", "APP_VERSION_NAME"
-        ],
-        "metrics": [
-            "AD_REQUESTS", "CLICKS", "ESTIMATED_EARNINGS", "IMPRESSIONS",
-            "IMPRESSION_CTR", "MATCHED_REQUESTS", "MATCH_RATE", "OBSERVED_ECPM"
-        ],
+        "dimensions": dimensions,
+        "metrics":    metrics,
         "sortConditions": [
             {"dimension": "DATE", "order": "ASCENDING"}
         ]
@@ -65,32 +69,27 @@ def fetch_mediation(service, account_name, report_date):
     for chunk in response:
         if "row" not in chunk:
             continue
-        dv = chunk["row"]["dimensionValues"]
-        mv = chunk["row"]["metricValues"]
-        rows.append({
-            "date":                      dv["DATE"]["value"],
-            "app":                       dv["APP"]["value"],
-            "ad_unit":                   dv["AD_UNIT"]["value"],
-            "ad_source":                 dv["AD_SOURCE"]["value"],
-            "ad_source_instance":        dv["AD_SOURCE_INSTANCE"]["value"],
-            "mediation_group":           dv["MEDIATION_GROUP"]["value"],
-            "country":                   dv["COUNTRY"]["value"],
-            "app_version_name":          dv["APP_VERSION_NAME"]["value"],
-            "ad_requests":               int(mv["AD_REQUESTS"]["integerValue"]),
-            "clicks":                    int(mv["CLICKS"]["integerValue"]),
-            "estimated_earnings_micros": int(mv["ESTIMATED_EARNINGS"]["microsValue"]),
-            "impressions":               int(mv["IMPRESSIONS"]["integerValue"]),
-            "impression_ctr":            float(mv["IMPRESSION_CTR"]["doubleValue"]),
-            "matched_requests":          int(mv["MATCHED_REQUESTS"]["integerValue"]),
-            "match_rate":                float(mv["MATCH_RATE"]["doubleValue"]),
-            "observed_ecpm_micros":      int(mv["OBSERVED_ECPM"]["microsValue"])
-        })
+        dv_list = chunk["row"]["dimensionValues"]
+        mv_list = chunk["row"]["metricValues"]
+
+        record = {}
+        for i, dim in enumerate(dimensions):
+            record[dim.lower()] = dv_list[i]["value"]
+        for i, met in enumerate(metrics):
+            mv = mv_list[i]
+            if "integerValue" in mv:
+                record[met.lower()] = int(mv["integerValue"])
+            elif "doubleValue" in mv:
+                record[met.lower()] = float(mv["doubleValue"])
+            elif "microsValue" in mv:
+                record[met.lower() + "_micros"] = int(mv["microsValue"])
+        rows.append(record)
+
     return rows
 
 def main():
     creds   = get_admob_creds()
     service = build_service(creds)
-    # PUBLISHER_ID should be the 'pub-XXXX' string
     report_date = date.today() - timedelta(days=1)
     rows = fetch_mediation(service, os.getenv("ADMOB_PUBLISHER_ID"), report_date)
     for r in rows:
