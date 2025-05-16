@@ -5,7 +5,7 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
-# ─── Configuration via ENV ─────────────────────────────────────────────────────
+# Environment variables
 CLIENT_ID       = os.getenv("ADMOB_CLIENT_ID")
 CLIENT_SECRET   = os.getenv("ADMOB_CLIENT_SECRET")
 REFRESH_TOKEN   = os.getenv("ADMOB_REFRESH_TOKEN")
@@ -13,7 +13,6 @@ PUBLISHER_ID    = os.getenv("ADMOB_PUBLISHER_ID")
 API_SCOPE       = "https://www.googleapis.com/auth/admob.report"
 
 def get_admob_creds():
-    """Refresh OAuth2 credentials for AdMob API calls."""
     creds = Credentials(
         token=None,
         refresh_token=REFRESH_TOKEN,
@@ -26,15 +25,9 @@ def get_admob_creds():
     return creds
 
 def build_service(creds):
-    """Builds the AdMob API client."""
     return build("admob", "v1", credentials=creds, cache_discovery=False)
 
 def fetch_mediation(service, account_name, report_date):
-    """
-    Calls accounts.mediationReport.generate() for the given date.
-    Returns a list of row dicts.
-    """
-    # Define the report specification
     spec = {
         "dateRange": {
             "startDate": {
@@ -49,7 +42,7 @@ def fetch_mediation(service, account_name, report_date):
             },
         },
         "dimensions": [
-            "DATE", "MONTH", "WEEK",
+            "DATE",            # only this time dimension
             "APP", "AD_UNIT",
             "AD_SOURCE", "AD_SOURCE_INSTANCE", "MEDIATION_GROUP",
             "COUNTRY", "APP_VERSION_NAME"
@@ -63,23 +56,19 @@ def fetch_mediation(service, account_name, report_date):
         ]
     }
 
-    # Execute the mediation report request
-    response_stream = service.accounts().mediationReport().generate(
+    response = service.accounts().mediationReport().generate(
         parent=f"accounts/{account_name}",
         body={"reportSpec": spec}
-    ).execute()  # :contentReference[oaicite:0]{index=0}
+    ).execute()
 
-    # Parse out each row
     rows = []
-    for chunk in response_stream:
+    for chunk in response:
         if "row" not in chunk:
             continue
         dv = chunk["row"]["dimensionValues"]
         mv = chunk["row"]["metricValues"]
-        record = {
+        rows.append({
             "date":                      dv["DATE"]["value"],
-            "month":                     dv["MONTH"]["value"],
-            "week":                      dv["WEEK"]["value"],
             "app":                       dv["APP"]["value"],
             "ad_unit":                   dv["AD_UNIT"]["value"],
             "ad_source":                 dv["AD_SOURCE"]["value"],
@@ -95,24 +84,15 @@ def fetch_mediation(service, account_name, report_date):
             "matched_requests":          int(mv["MATCHED_REQUESTS"]["integerValue"]),
             "match_rate":                float(mv["MATCH_RATE"]["doubleValue"]),
             "observed_ecpm_micros":      int(mv["OBSERVED_ECPM"]["microsValue"])
-        }
-        rows.append(record)
+        })
     return rows
 
 def main():
-    # 1. Refresh credentials and build service
     creds   = get_admob_creds()
     service = build_service(creds)
-
-    # 2. Retrieve your account resource name
-    #    (publisher_id is the 'pub-...' string)
-    account_name = PUBLISHER_ID
-
-    # 3. Fetch yesterday’s mediation report
+    # PUBLISHER_ID should be the 'pub-XXXX' string
     report_date = date.today() - timedelta(days=1)
-    rows = fetch_mediation(service, account_name, report_date)
-
-    # 4. Output results
+    rows = fetch_mediation(service, os.getenv("ADMOB_PUBLISHER_ID"), report_date)
     for r in rows:
         print(r)
 
