@@ -42,5 +42,14 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
+            - name: Debug: show Publisher ID
+        run: |
+          echo "ADMOB_PUBLISHER_ID='${ADMOB_PUBLISHER_ID}'"
+          if [ -z "$ADMOB_PUBLISHER_ID" ]; then
+            echo "❌ Publisher ID is empty!"
+            exit 1
+          fi
+
+
       - name: Run AdMob export script
         run: python main.py
