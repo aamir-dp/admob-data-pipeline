@@ -18,7 +18,7 @@ required = {
     "BQ_DATASET":          os.getenv("BQ_DATASET"),
     "BQ_TABLE":            os.getenv("BQ_TABLE"),
 }
-missing = [k for k,v in required.items() if not v]
+missing = [k for k, v in required.items() if not v]
 if missing:
     raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
@@ -71,13 +71,13 @@ def fetch_mediation(service, account_name, report_date):
         "sortConditions":[{"dimension":"DATE","order":"ASCENDING"}]
     }
 
-    resp = service.accounts().mediationReport().generate(
+    response = service.accounts().mediationReport().generate(
         parent=f"accounts/{account_name}",
         body={"reportSpec": spec}
     ).execute()
 
     rows = []
-    for chunk in resp:
+    for chunk in response:
         row = chunk.get("row")
         if not row:
             continue
@@ -85,18 +85,31 @@ def fetch_mediation(service, account_name, report_date):
         mv = row["metricValues"]
 
         rec = {}
-        for d in dims:
+        # Reformat raw DATE value ("YYYYMMDD") into "YYYY-MM-DD"
+        raw_date = dv.get("DATE", {}).get("value", "")
+        if len(raw_date) == 8 and raw_date.isdigit():
+            rec["date"] = f"{raw_date[0:4]}-{raw_date[4:6]}-{raw_date[6:8]}"
+        else:
+            rec["date"] = raw_date  # fallback
+
+        # Other dimensions
+        for d in dims[1:]:  # skip "DATE" since handled
             rec[d.lower()] = dv.get(d, {}).get("value")
+
+        # Metrics with safe defaults
         for m in mets:
             val = mv.get(m)
+            key = m.lower() + ("_micros" if "OBSERVED_ECPM" in m or "ESTIMATED_EARNINGS" in m else "")
+            simple_key = m.lower() if key.endswith("_micros") else m.lower()
             if not val:
-                rec[m.lower()] = 0
+                rec[simple_key] = 0
             elif "integerValue" in val:
-                rec[m.lower()] = int(val["integerValue"])
+                rec[simple_key] = int(val["integerValue"])
             elif "doubleValue" in val:
-                rec[m.lower()] = float(val["doubleValue"])
+                rec[simple_key] = float(val["doubleValue"])
             elif "microsValue" in val:
-                rec[f"{m.lower()}_micros"] = int(val["microsValue"])
+                rec[key] = int(val["microsValue"])
+
         rows.append(rec)
 
     return rows
@@ -112,11 +125,13 @@ def upload_to_gcs(data_str, filename):
 def load_to_bq(gcs_uri):
     client = bigquery.Client(project=BQ_PROJECT)
     table_ref = client.dataset(BQ_DATASET).table(BQ_TABLE)
+
     job_config = bigquery.LoadJobConfig(
         source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
         write_disposition="WRITE_APPEND",
-        # AUTODETECT OFF: use existing table schema
+        # no autodetect: use your existing table schema
     )
+
     job = client.load_table_from_uri(gcs_uri, table_ref, job_config=job_config)
     job.result()
     print(f"Loaded {job.output_rows} rows into {BQ_DATASET}.{BQ_TABLE}")
