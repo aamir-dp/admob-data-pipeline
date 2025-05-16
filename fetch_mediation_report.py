@@ -19,9 +19,9 @@ REQUIRED_ENVS = {
     "BQ_TABLE":             os.getenv("BQ_TABLE"),
 }
 
-missing = [k for k, v in REQUIRED_ENVS.items() if not v]
-if missing:
-    raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
+# missing = [k for k, v in REQUIRED_ENVS.items() if not v]
+# if missing:
+#     raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
 CLIENT_ID       = REQUIRED_ENVS["ADMOB_CLIENT_ID"]
 CLIENT_SECRET   = REQUIRED_ENVS["ADMOB_CLIENT_SECRET"]
