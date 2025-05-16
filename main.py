@@ -1,13 +1,12 @@
-import os
-import json
+import os, json
 from datetime import date, timedelta
 
-import requests
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from google.cloud import storage, bigquery
 
-# ─── Configuration via ENV ─────────────────────────────────────────────────────
+# ─── Environment Configuration ────────────────────────────────────────────────
 CLIENT_ID        = os.getenv("ADMOB_CLIENT_ID")
 CLIENT_SECRET    = os.getenv("ADMOB_CLIENT_SECRET")
 REFRESH_TOKEN    = os.getenv("ADMOB_REFRESH_TOKEN")
@@ -17,68 +16,47 @@ BQ_PROJECT       = os.getenv("GCP_PROJECT")
 BQ_DATASET       = os.getenv("BQ_DATASET")
 BQ_TABLE         = os.getenv("BQ_TABLE")
 
-# ─── AdMob OAuth2 Scope ─────────────────────────────────────────────────────────
-SCOPES = ["https://www.googleapis.com/auth/admob.report"]
+API_SCOPE        = "https://www.googleapis.com/auth/admob.report"
 
 def get_admob_creds():
-    """
-    Uses your stored refresh token to fetch a new access token.
-    """
+    """Refreshes and returns OAuth2 credentials for AdMob API calls."""
     creds = Credentials(
         token=None,
         refresh_token=REFRESH_TOKEN,
         token_uri="https://oauth2.googleapis.com/token",
         client_id=CLIENT_ID,
         client_secret=CLIENT_SECRET,
-        scopes=SCOPES,
+        scopes=[API_SCOPE],
     )
-    # this does the token exchange under the hood
-    creds.refresh(requests_kwargs={})
+    creds.refresh(Request())  # Correct refresh call :contentReference[oaicite:5]{index=5}:contentReference[oaicite:6]{index=6}
     return creds
 
-def fetch_admob_report(creds, account_name, report_date):
-    """
-    Calls accounts.networkReport.generate for the given date.
-    Returns an iterable of JSON chunks.
-    """
-    service = build("admob", "v1", credentials=creds, cache_discovery=False)
-    report_spec = {
-        "dateRange": {
-            "startDate": {
-                "year": report_date.year,
-                "month": report_date.month,
-                "day": report_date.day,
-            },
-            "endDate": {
-                "year": report_date.year,
-                "month": report_date.month,
-                "day": report_date.day,
-            },
-        },
-        "dimensions": [
-            "DATE", "MONTH", "WEEK",
-            "AD_SOURCE", "AD_SOURCE_INSTANCE",
-            "AD_UNIT", "APP", "MEDIATION_GROUP",
-            "COUNTRY", "APP_VERSION_NAME"
-        ],
-        "metrics": [
-            "AD_REQUESTS", "CLICKS", "ESTIMATED_EARNINGS", "IMPRESSIONS",
-            "IMPRESSION_CTR", "IMPRESSION_RPM", "MATCH_RATE", "SHOW_RATE"
-        ],
-        "sortConditions": [
-            {"dimension": "DATE", "order": "ASCENDING"}
-        ]
-    }
-    request = service.accounts().networkReport().generate(
-        parent=account_name,
-        body={"reportSpec": report_spec}
-    )
-    return request.execute()
+def get_admob_service(creds):
+    """Builds and returns the AdMob API service object."""
+    return build("admob", "v1", credentials=creds, cache_discovery=False)
 
-def parse_report_rows(stream):
+def get_account_name(service, publisher_id):
+    """Fetches and prints AdMob account info, returns the account resource name."""
+    response = service.accounts().get(name=f"accounts/{publisher_id}").execute()
+    print("Account:", response["name"], "Publisher ID:", response["publisherId"])  # :contentReference[oaicite:7]{index=7}
+    return response["name"]
+
+def fetch_report(service, parent, method, report_spec):
     """
-    Given the JSON stream from the API, extract each row into a dict.
+    Executes either networkReport.generate or mediationReport.generate
+    and returns the streaming response.
     """
+    if method == "network":
+        return service.accounts().networkReport().generate(
+            parent=parent, body={"reportSpec": report_spec}
+        ).execute()  # :contentReference[oaicite:8]{index=8}
+    else:
+        return service.accounts().mediationReport().generate(
+            parent=parent, body={"reportSpec": report_spec}
+        ).execute()  # :contentReference[oaicite:9]{index=9}
+
+def parse_rows(stream):
+    """Extracts and returns list of dict records from the API stream."""
     rows = []
     for chunk in stream:
         if "row" not in chunk:
@@ -86,83 +64,94 @@ def parse_report_rows(stream):
         dv = chunk["row"]["dimensionValues"]
         mv = chunk["row"]["metricValues"]
         record = {
-            "date": dv[0]["value"],
-            "month": dv[1]["value"],
-            "week": dv[2]["value"],
-            "ad_source": dv[3]["value"],
-            "ad_source_instance": dv[4]["value"],
-            "ad_unit": dv[5]["value"],
-            "app": dv[6]["value"],
-            "mediation_group": dv[7]["value"],
-            "country": dv[8]["value"],
-            "app_version_name": dv[9]["value"],
-            "ad_requests":      int(mv[0].get("integerValue", 0)),
-            "clicks":           int(mv[1].get("integerValue", 0)),
-            "estimated_earnings_micros": int(mv[2].get("microsValue", 0)),
-            "impressions":      int(mv[3].get("integerValue", 0)),
-            "impression_ctr":   float(mv[4].get("doubleValue", 0)),
-            "impression_rpm_micros":     int(mv[5].get("microsValue", 0)),
-            "match_rate":       float(mv[6].get("doubleValue", 0)),
-            "show_rate":        float(mv[7].get("doubleValue", 0)),
+            "date": dv["DATE"]["value"],
+            "month": dv["MONTH"]["value"],
+            "week": dv["WEEK"]["value"],
+            "ad_source": dv["AD_SOURCE"]["value"],
+            "ad_source_instance": dv["AD_SOURCE_INSTANCE"]["value"],
+            "ad_unit": dv["AD_UNIT"]["value"],
+            "app": dv["APP"]["value"],
+            "mediation_group": dv["MEDIATION_GROUP"]["value"],
+            "country": dv["COUNTRY"]["value"],
+            "app_version_name": dv["APP_VERSION_NAME"]["value"],
+            "ad_requests": int(mv["AD_REQUESTS"]["integerValue"]),
+            "clicks": int(mv["CLICKS"]["integerValue"]),
+            "estimated_earnings_micros": int(mv["ESTIMATED_EARNINGS"]["microsValue"]),
+            "impressions": int(mv["IMPRESSIONS"]["integerValue"]),
+            "impression_ctr": float(mv["IMPRESSION_CTR"]["doubleValue"]),
+            "impression_rpm_micros": int(mv["IMPRESSION_RPM"]["microsValue"]),
+            "match_rate": float(mv["MATCH_RATE"]["doubleValue"]),
+            "show_rate": float(mv["SHOW_RATE"]["doubleValue"]),
         }
         rows.append(record)
     return rows
 
-def upload_to_gcs(rows, filename):
-    """
-    Write newline-delimited JSON to your GCS bucket.
-    """
-    client = storage.Client()
-    bucket = client.bucket(GCS_BUCKET)
-    blob = bucket.blob(filename)
-    payload = "\n".join(json.dumps(r) for r in rows)
+def upload_jsonl_to_gcs(records, filename):
+    """Uploads newline-delimited JSON records to GCS."""
+    client = storage.Client()  # :contentReference[oaicite:10]{index=10}
+    blob = client.bucket(GCS_BUCKET).blob(filename)
+    payload = "\n".join(json.dumps(r) for r in records)
     blob.upload_from_string(payload, content_type="application/json")
-    print(f"✅ Wrote {len(rows)} rows to gs://{GCS_BUCKET}/{filename}")
+    print(f"Uploaded {len(records)} rows to gs://{GCS_BUCKET}/{filename}")  
 
-def load_into_bigquery(filename):
-    """
-    Load the JSONL file from GCS into BigQuery with autodetect schema.
-    """
+def load_jsonl_to_bq(filename):
+    """Appends the JSONL file from GCS into BigQuery."""
     client = bigquery.Client(project=BQ_PROJECT)
     table_ref = client.dataset(BQ_DATASET).table(BQ_TABLE)
     job_config = bigquery.LoadJobConfig(
         source_format=bigquery.SourceFormat.NEWLINE_DELIMITED_JSON,
         autodetect=True,
         write_disposition="WRITE_APPEND"
-    )
+    )  # :contentReference[oaicite:11]{index=11}
     uri = f"gs://{GCS_BUCKET}/{filename}"
-    load_job = client.load_table_from_uri(uri, table_ref, job_config=job_config)
-    load_job.result()  # wait
-    print(f"✅ Loaded {load_job.output_rows} rows into {BQ_DATASET}.{BQ_TABLE}")
+    job = client.load_table_from_uri(uri, table_ref, job_config=job_config)
+    job.result()
+    print(f"Loaded {job.output_rows} rows into {BQ_DATASET}.{BQ_TABLE}")
 
 def main():
-    # 1. Refresh token & build creds
-    creds = get_admob_creds()
+    # 1. Authenticate to AdMob
+    creds   = get_admob_creds()
+    service = get_admob_service(creds)
 
-    # 2. Get your AdMob publisher account name
-    service = build("admob", "v1", credentials=creds, cache_discovery=False)
-    accounts = service.accounts().list().execute().get("account", [])
-    if not accounts:
-        raise RuntimeError("No AdMob accounts found.")
-    account_name = accounts[0]["name"]
-    print("Using AdMob account:", account_name)
+    # 2. Get account resource name
+    PUBLISHER_ID = os.getenv("ADMOB_PUBLISHER_ID")  # e.g. 'pub-123456…'
+    account_name = get_account_name(service, PUBLISHER_ID)
 
-    # 3. Define the date to export (yesterday)
-    export_date = date.today() - timedelta(days=1)
-    print("Exporting data for:", export_date)
+    # 3. Build a report spec for yesterday’s metrics
+    yesterday = date.today() - timedelta(days=1)
+    spec = {
+        "dateRange": {
+            "startDate": {"year": yesterday.year,"month": yesterday.month,"day": yesterday.day},
+            "endDate":   {"year": yesterday.year,"month": yesterday.month,"day": yesterday.day}
+        },
+        "dimensions": [
+            "DATE","MONTH","WEEK","AD_SOURCE","AD_SOURCE_INSTANCE",
+            "AD_UNIT","APP","MEDIATION_GROUP","COUNTRY","APP_VERSION_NAME"
+        ],
+        "metrics": [
+            "AD_REQUESTS","CLICKS","ESTIMATED_EARNINGS","IMPRESSIONS",
+            "IMPRESSION_CTR","IMPRESSION_RPM","MATCH_RATE","SHOW_RATE"
+        ],
+        "sortConditions": [{"dimension":"DATE","order":"ASCENDING"}]
+    }
 
-    # 4. Fetch & parse
-    stream = fetch_admob_report(creds, account_name, export_date)
-    rows = parse_report_rows(stream)
+    # 4. Fetch & parse network report
+    net_stream = fetch_report(service, account_name, "network", spec)
+    net_rows   = parse_rows(net_stream)
 
-    if not rows:
-        print("⚠️ No rows returned for", export_date)
+    # 5. Fetch & parse mediation report
+    med_stream = fetch_report(service, account_name, "mediation", spec)
+    med_rows   = parse_rows(med_stream)
+
+    all_rows = net_rows + med_rows
+    if not all_rows:
+        print("No data for", yesterday)
         return
 
-    # 5. Upload to GCS & load into BQ
-    filename = f"admob_{export_date:%Y%m%d}.jsonl"
-    upload_to_gcs(rows, filename)
-    load_into_bigquery(filename)
+    # 6. Upload & load
+    filename = f"admob_{yesterday:%Y%m%d}.jsonl"
+    upload_jsonl_to_gcs(all_rows, filename)
+    load_jsonl_to_bq(filename)
 
 if __name__ == "__main__":
     main()
