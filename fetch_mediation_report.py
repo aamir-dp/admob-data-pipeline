@@ -13,6 +13,7 @@ PUBLISHER_ID    = os.getenv("ADMOB_PUBLISHER_ID")
 API_SCOPE       = "https://www.googleapis.com/auth/admob.report"
 
 def get_admob_creds():
+    """Refresh OAuth2 credentials for AdMob API calls."""
     creds = Credentials(
         token=None,
         refresh_token=REFRESH_TOKEN,
@@ -21,68 +22,64 @@ def get_admob_creds():
         client_secret=CLIENT_SECRET,
         scopes=[API_SCOPE],
     )
-    creds.refresh(Request())
+    creds.refresh(Request())  # uses google-auth Request transport :contentReference[oaicite:0]{index=0}
     return creds
 
 def build_service(creds):
+    """Build the AdMob API client."""
     return build("admob", "v1", credentials=creds, cache_discovery=False)
 
 def fetch_mediation(service, account_name, report_date):
-    # Only DATE as time dimension; removed APP_VERSION_NAME
-    dimensions = [
-        "DATE",
-        "APP", "AD_UNIT",
-        "AD_SOURCE", "AD_SOURCE_INSTANCE", "MEDIATION_GROUP",
-        "COUNTRY"
+    """
+    Calls accounts.mediationReport.generate() for the given date,
+    parses dict‐based dimensionValues and metricValues, and returns rows.
+    """
+    dims = [
+      "DATE",
+      "APP", "AD_UNIT",
+      "AD_SOURCE", "AD_SOURCE_INSTANCE", "MEDIATION_GROUP",
+      "COUNTRY"
     ]
-    metrics = [
-        "AD_REQUESTS", "CLICKS", "ESTIMATED_EARNINGS", "IMPRESSIONS",
-        "IMPRESSION_CTR", "MATCHED_REQUESTS", "MATCH_RATE", "OBSERVED_ECPM"
+    mets = [
+      "AD_REQUESTS", "CLICKS", "ESTIMATED_EARNINGS", "IMPRESSIONS",
+      "IMPRESSION_CTR", "MATCHED_REQUESTS", "MATCH_RATE", "OBSERVED_ECPM"
     ]
 
     spec = {
-        "dateRange": {
-            "startDate": {
-                "year":  report_date.year,
-                "month": report_date.month,
-                "day":   report_date.day,
-            },
-            "endDate": {
-                "year":  report_date.year,
-                "month": report_date.month,
-                "day":   report_date.day,
-            },
-        },
-        "dimensions": dimensions,
-        "metrics":    metrics,
-        "sortConditions": [
-            {"dimension": "DATE", "order": "ASCENDING"}
-        ]
+      "dateRange": {
+        "startDate": {"year": report_date.year, "month": report_date.month, "day": report_date.day},
+        "endDate":   {"year": report_date.year, "month": report_date.month, "day": report_date.day}
+      },
+      "dimensions":    dims,
+      "metrics":       mets,
+      "sortConditions":[{"dimension":"DATE","order":"ASCENDING"}]
     }
 
-    response = service.accounts().mediationReport().generate(
-        parent=f"accounts/{account_name}",
-        body={"reportSpec": spec}
-    ).execute()
+    resp = service.accounts().mediationReport().generate(
+      parent=f"accounts/{account_name}", body={"reportSpec": spec}
+    ).execute()  # returns a list of chunks :contentReference[oaicite:1]{index=1}
 
     rows = []
-    for chunk in response:
-        if "row" not in chunk:
+    for chunk in resp:
+        row = chunk.get("row")
+        if not row:
             continue
-        dv_list = chunk["row"]["dimensionValues"]
-        mv_list = chunk["row"]["metricValues"]
+        dv = row["dimensionValues"]  # dict keyed by dim name :contentReference[oaicite:2]{index=2}
+        mv = row["metricValues"]     # dict keyed by metric name
 
         record = {}
-        for i, dim in enumerate(dimensions):
-            record[dim.lower()] = dv_list[i]["value"]
-        for i, met in enumerate(metrics):
-            mv = mv_list[i]
-            if "integerValue" in mv:
-                record[met.lower()] = int(mv["integerValue"])
-            elif "doubleValue" in mv:
-                record[met.lower()] = float(mv["doubleValue"])
-            elif "microsValue" in mv:
-                record[met.lower() + "_micros"] = int(mv["microsValue"])
+        # extract dimensions
+        for d in dims:
+            record[d.lower()] = dv[d]["value"]
+        # extract metrics
+        for m in mets:
+            val = mv[m]
+            if "integerValue" in val:
+                record[m.lower()] = int(val["integerValue"])
+            elif "doubleValue" in val:
+                record[m.lower()] = float(val["doubleValue"])
+            elif "microsValue" in val:
+                record[f"{m.lower()}_micros"] = int(val["microsValue"])
         rows.append(record)
 
     return rows
