@@ -16,10 +16,10 @@ jobs:
       ADMOB_REFRESH_TOKEN:  ${{ secrets.ADMOB_REFRESH_TOKEN }}
       ADMOB_PUBLISHER_ID:   ${{ secrets.ADMOB_PUBLISHER_ID }}
 
-      GCP_PROJECT:          ${{ vars.GCP_PROJECT }}
-      GCS_BUCKET_NAME:      ${{ vars.GCS_BUCKET_NAME }}
-      BQ_DATASET:           ${{ vars.BQ_DATASET }}
-      BQ_TABLE:             ${{ vars.BQ_TABLE }}
+      GCP_PROJECT:          ${{ secrets.GCP_PROJECT }}
+      GCS_BUCKET_NAME:      ${{ secrets.GCS_BUCKET_NAME }}
+      BQ_DATASET:           ${{ secrets.BQ_DATASET }}
+      BQ_TABLE:             ${{ secrets.BQ_TABLE }}
 
     steps:
       - name: Checkout repository
