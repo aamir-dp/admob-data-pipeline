@@ -1,41 +1,42 @@
-name: 📊 Daily AdMob → BigQuery Export
-
 on:
   schedule:
-    - cron:  '0 1 * * *'        # Runs daily at 01:00 UTC
-  workflow_dispatch:           # Manual trigger
-
-env:
-  GCP_PROJECT:      ${{ vars.GCP_PROJECT }}
-  GCS_BUCKET_NAME:  ${{ vars.GCS_BUCKET_NAME }}
-  BQ_DATASET:       ${{ vars.BQ_DATASET }}
-  BQ_TABLE:         ${{ vars.BQ_TABLE }}
-  ADMOB_CLIENT_ID:      ${{ secrets.ADMOB_CLIENT_ID }}
-  ADMOB_CLIENT_SECRET:  ${{ secrets.ADMOB_CLIENT_SECRET }}
-  ADMOB_REFRESH_TOKEN:  ${{ secrets.ADMOB_REFRESH_TOKEN }}
+    - cron: "0 1 * * *"     # Daily at 01:00 UTC
+  workflow_dispatch:       # Manual trigger
 
 jobs:
   export:
     runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+    env:
+      # AdMob OAuth (Project A)
+      ADMOB_CLIENT_ID:      ${{ secrets.ADMOB_CLIENT_ID }}
+      ADMOB_CLIENT_SECRET:  ${{ secrets.ADMOB_CLIENT_SECRET }}
+      ADMOB_REFRESH_TOKEN:  ${{ secrets.ADMOB_REFRESH_TOKEN }}
+      ADMOB_PUBLISHER_ID:   ${{ vars.ADMOB_PUBLISHER_ID }}
 
-      - name: Set up Python 3.9
+      # GCP/IAM (Project B)
+      GCP_PROJECT:          ${{ vars.GCP_PROJECT }}
+      GCS_BUCKET_NAME:      ${{ vars.GCS_BUCKET_NAME }}
+      BQ_DATASET:           ${{ vars.BQ_DATASET }}
+      BQ_TABLE:             ${{ vars.BQ_TABLE }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Authenticate to GCP for GCS & BigQuery
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: "3.9"
 
       - name: Install dependencies
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Authenticate to GCP
-        uses: google-github-actions/auth@v1
-        with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
-
-      - name: Run export script
+      - name: Run AdMob export
         run: python main.py
