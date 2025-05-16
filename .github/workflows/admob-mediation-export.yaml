@@ -1,0 +1,58 @@
+name: 📊 Daily AdMob → BigQuery Export
+
+on:
+  schedule:
+    - cron:  '0 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+
+    # Inject everything here; note publisher ID is now a secret
+    env:
+      ADMOB_CLIENT_ID:      ${{ secrets.ADMOB_CLIENT_ID }}
+      ADMOB_CLIENT_SECRET:  ${{ secrets.ADMOB_CLIENT_SECRET }}
+      ADMOB_REFRESH_TOKEN:  ${{ secrets.ADMOB_REFRESH_TOKEN }}
+      ADMOB_PUBLISHER_ID:   ${{ secrets.ADMOB_PUBLISHER_ID }}
+
+      GCP_PROJECT:          ${{ vars.GCP_PROJECT }}
+      GCS_BUCKET_NAME:      ${{ vars.GCS_BUCKET_NAME }}
+      BQ_DATASET:           ${{ vars.BQ_DATASET }}
+      BQ_TABLE:             ${{ vars.BQ_TABLE }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Authenticate to GCP (GCS & BigQuery)
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ─── DEBUG STEPS ──────────────────────────────────────────────────────────
+      - name: Dump environment variables
+        run: |
+          echo "=== ENVIRONMENT DUMP ==="
+          env
+      - name: Check ADMOB_PUBLISHER_ID
+        run: |
+          echo "ADMOB_PUBLISHER_ID='$ADMOB_PUBLISHER_ID'"
+          if [ -z "$ADMOB_PUBLISHER_ID" ]; then
+            echo "❌ ERROR: ADMOB_PUBLISHER_ID is empty or not set!"
+            exit 1
+          fi
+
+      # ─── ACTUAL EXPORT ────────────────────────────────────────────────────────
+      - name: Run AdMob export script
+        run: python fetch_mediation_report.py
