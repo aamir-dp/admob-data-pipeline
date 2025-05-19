@@ -1,40 +1,36 @@
-import os
-import csv
+import os, csv, json
 from datetime import date, timedelta
-
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from google.cloud import storage, bigquery
-from google.api_core.exceptions import BadRequest
 
-# ─── CONFIGURATION & VALIDATION ───────────────────────────────────────────────
-required = {
+# ─── CONFIG & VALIDATION ───────────────────────────────────────────────────────
+required_env = {
     "ADMOB_CLIENT_ID":     os.getenv("ADMOB_CLIENT_ID"),
     "ADMOB_CLIENT_SECRET": os.getenv("ADMOB_CLIENT_SECRET"),
     "ADMOB_REFRESH_TOKEN": os.getenv("ADMOB_REFRESH_TOKEN"),
     "ADMOB_PUBLISHER_ID":  os.getenv("ADMOB_PUBLISHER_ID"),
-    "GCP_PROJECT":         os.getenv("GCP_PROJECT"),
     "GCS_BUCKET_NAME":     os.getenv("GCS_BUCKET_NAME"),
+    "BQ_PROJECT":          os.getenv("GCP_PROJECT"),
     "BQ_DATASET":          os.getenv("BQ_DATASET"),
     "BQ_TABLE":            os.getenv("BQ_TABLE"),
 }
-missing = [k for k,v in required.items() if not v]
+missing = [k for k,v in required_env.items() if not v]
 if missing:
-    raise RuntimeError(f"Missing environment variables: {', '.join(missing)}")
+    raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
-CLIENT_ID     = required["ADMOB_CLIENT_ID"]
-CLIENT_SECRET = required["ADMOB_CLIENT_SECRET"]
-REFRESH_TOKEN = required["ADMOB_REFRESH_TOKEN"]
-PUBLISHER_ID  = required["ADMOB_PUBLISHER_ID"]
-PROJECT       = required["GCP_PROJECT"]
-BUCKET_NAME   = required["GCS_BUCKET_NAME"]
-DATASET       = required["BQ_DATASET"]
-TABLE         = required["BQ_TABLE"]
+CLIENT_ID     = required_env["ADMOB_CLIENT_ID"]
+CLIENT_SECRET = required_env["ADMOB_CLIENT_SECRET"]
+REFRESH_TOKEN = required_env["ADMOB_REFRESH_TOKEN"]
+PUBLISHER_ID  = required_env["ADMOB_PUBLISHER_ID"]
+GCS_BUCKET    = required_env["GCS_BUCKET_NAME"]
+BQ_PROJECT    = required_env["BQ_PROJECT"]
+BQ_DATASET    = required_env["BQ_DATASET"]
+BQ_TABLE      = required_env["BQ_TABLE"]
+API_SCOPE     = "https://www.googleapis.com/auth/admob.report"
 
-API_SCOPE = "https://www.googleapis.com/auth/admob.report"
-
-# ─── STEP 1: ADMOB AUTHENTICATION ─────────────────────────────────────────────
+# ─── AUTHENTICATION ────────────────────────────────────────────────────────────
 def get_admob_creds():
     creds = Credentials(
         token=None,
@@ -44,119 +40,100 @@ def get_admob_creds():
         client_secret=CLIENT_SECRET,
         scopes=[API_SCOPE],
     )
-    creds.refresh(Request())
+    creds.refresh(Request())  # uses google-auth Request transport :contentReference[oaicite:3]{index=3}
     return creds
 
-def build_admob_service(creds):
+def build_service(creds):
     return build("admob", "v1", credentials=creds, cache_discovery=False)
 
-# ─── STEP 2: FETCH & FLATTEN REPORT ────────────────────────────────────────────
-def fetch_rows(service, publisher_id, report_date):
+# ─── FETCH & FLATTEN ────────────────────────────────────────────────────────────
+def fetch_mediation(service, account_name, report_date):
     spec = {
         "dateRange": {
             "startDate": {"year": report_date.year, "month": report_date.month, "day": report_date.day},
             "endDate":   {"year": report_date.year, "month": report_date.month, "day": report_date.day},
         },
-        "dimensions": [
-            "DATE", "APP", "AD_UNIT",
-            "AD_SOURCE", "AD_SOURCE_INSTANCE", "MEDIATION_GROUP", "COUNTRY"
-        ],
-        "metrics": [
-            "AD_REQUESTS", "CLICKS", "ESTIMATED_EARNINGS", "IMPRESSIONS",
-            "IMPRESSION_CTR", "MATCHED_REQUESTS", "MATCH_RATE", "OBSERVED_ECPM"
-        ],
-        "sortConditions":[{"dimension":"DATE","order":"ASCENDING"}]
+        "dimensions": ["DATE","APP","AD_UNIT","AD_SOURCE","AD_SOURCE_INSTANCE","MEDIATION_GROUP","COUNTRY"],
+        "metrics":    ["AD_REQUESTS","CLICKS","ESTIMATED_EARNINGS","IMPRESSIONS","IMPRESSION_CTR",
+                       "MATCHED_REQUESTS","MATCH_RATE","OBSERVED_ECPM"],
+        "sortConditions": [{"dimension":"DATE","order":"ASCENDING"}],
     }
-    response = service.accounts().mediationReport().generate(
-        parent=f"accounts/{publisher_id}",
-        body={"reportSpec": spec}
-    ).execute()  # returns list of chunk dicts 
+    resp = service.accounts().mediationReport().generate(
+        parent=f"accounts/{account_name}", body={"reportSpec": spec}
+    ).execute()  # returns dict with 'rows' :contentReference[oaicite:4]{index=4}
 
     rows = []
-    for chunk in response:
-        row = chunk.get("row", {})
-        dv = row.get("dimensionValues", {})
-        mv = row.get("metricValues", {})
-        rows.append({
-            "date":                   dv.get("DATE", {}).get("value"),
-            "app":                    dv.get("APP", {}).get("value"),
-            "ad_unit":                dv.get("AD_UNIT", {}).get("value"),
-            "ad_source":              dv.get("AD_SOURCE", {}).get("value"),
-            "ad_source_instance":     dv.get("AD_SOURCE_INSTANCE", {}).get("value"),
-            "mediation_group":        dv.get("MEDIATION_GROUP", {}).get("value"),
-            "country":                dv.get("COUNTRY", {}).get("value"),
-            "ad_requests":            int(mv.get("AD_REQUESTS", {}).get("integerValue", 0)),
-            "clicks":                 int(mv.get("CLICKS", {}).get("integerValue", 0)),
-            "estimated_earnings_micros": int(mv.get("ESTIMATED_EARNINGS", {}).get("microsValue", 0)),
-            "impressions":            int(mv.get("IMPRESSIONS", {}).get("integerValue", 0)),
-            "impression_ctr":         float(mv.get("IMPRESSION_CTR", {}).get("doubleValue", 0.0)),
-            "matched_requests":       int(mv.get("MATCHED_REQUESTS", {}).get("integerValue", 0)),
-            "match_rate":             float(mv.get("MATCH_RATE", {}).get("doubleValue", 0.0)),
-            "observed_ecpm_micros":   int(mv.get("OBSERVED_ECPM", {}).get("microsValue", 0)),
-        })
+    for row in resp.get("rows", []):
+        rec = {}
+        # Flatten dimensions
+        for dv in row.get("dimensionValues", []):
+            dim = dv["key"]
+            raw = dv["value"]
+            if dim == "DATE" and raw and len(raw)==8:
+                rec["date"] = f"{raw[:4]}-{raw[4:6]}-{raw[6:]}"  # convert to YYYY-MM-DD :contentReference[oaicite:5]{index=5}
+            else:
+                rec[dim.lower()] = raw
+        # Flatten metrics
+        for mv in row.get("metricValues", []):
+            rec[mv["key"].lower()] = mv["value"]
+        rows.append(rec)
     return rows
 
-# ─── STEP 3: WRITE CSV ──────────────────────────────────────────────────────────
-def write_csv(filename, rows):
-    fieldnames = [
-        "date", "app", "ad_unit", "ad_source", "ad_source_instance",
-        "mediation_group", "country", "ad_requests", "clicks",
-        "estimated_earnings_micros", "impressions", "impression_ctr",
-        "matched_requests", "match_rate", "observed_ecpm_micros"
-    ]
-    with open(filename, "w", newline="") as f:  # avoid extra blank lines 
-        writer = csv.DictWriter(f, fieldnames=fieldnames)  # write header 
+# ─── CSV + GCS + BQ LOAD ────────────────────────────────────────────────────────
+def upload_csv_to_gcs(rows, filename):
+    # Write CSV locally
+    fieldnames = list(rows[0].keys())
+    with open(filename, "w", newline="") as f:  # newline='' prevents blank lines :contentReference[oaicite:6]{index=6}
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+    # Upload to GCS
+    client = storage.Client()
+    bucket = client.bucket(GCS_BUCKET)
+    blob = bucket.blob(filename)
+    blob.upload_from_filename(filename, content_type="text/csv")
+    print(f"Uploaded {filename} → gs://{GCS_BUCKET}/{filename}")
 
-# ─── STEP 4: UPLOAD CSV TO GCS ─────────────────────────────────────────────────
-def upload_to_gcs(local_path, bucket_name):
-    client = storage.Client(project=PROJECT)  # uses ADC :contentReference[oaicite:14]{index=14}
-    bucket = client.bucket(bucket_name)
-    blob = bucket.blob(os.path.basename(local_path))
-    blob.upload_from_filename(local_path)      # upload via filename :contentReference[oaicite:15]{index=15}
-    uri = f"gs://{bucket_name}/{os.path.basename(local_path)}"
-    print(f"Uploaded {local_path} → {uri}")
-    return uri
-
-# ─── STEP 5: LOAD CSV INTO BIGQUERY ────────────────────────────────────────────
-def load_csv_to_bq(gcs_uri, project, dataset, table):
-    client = bigquery.Client(project=project)
-    table_ref = client.dataset(dataset).table(table)
+def load_csv_to_bq(filename):
+    client = bigquery.Client(project=BQ_PROJECT)
+    uri = f"gs://{GCS_BUCKET}/{filename}"
+    table_ref = client.dataset(BQ_DATASET).table(BQ_TABLE)
     job_config = bigquery.LoadJobConfig(
-        source_format=bigquery.SourceFormat.CSV,          # CSV format :contentReference[oaicite:16]{index=16}
-        skip_leading_rows=1,                              # skip header :contentReference[oaicite:17]{index=17}
-        max_bad_records=100,                              # tolerate bad rows :contentReference[oaicite:18]{index=18}
-        allow_jagged_rows=True,                           # missing columns → NULL :contentReference[oaicite:19]{index=19}
-        ignore_unknown_values=True,                       # extra columns → ignored :contentReference[oaicite:20]{index=20}
-        write_disposition="WRITE_APPEND",
+        source_format=bigquery.SourceFormat.CSV,
+        skip_leading_rows=1,
+        autodetect=False,
+        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+        schema=[
+            bigquery.SchemaField("date", "DATE"),
+            bigquery.SchemaField("app", "STRING"),
+            bigquery.SchemaField("ad_unit", "STRING"),
+            bigquery.SchemaField("ad_source", "STRING"),
+            bigquery.SchemaField("ad_source_instance", "STRING"),
+            bigquery.SchemaField("mediation_group", "STRING"),
+            bigquery.SchemaField("country", "STRING"),
+            bigquery.SchemaField("ad_requests", "INTEGER"),
+            bigquery.SchemaField("clicks", "INTEGER"),
+            bigquery.SchemaField("estimated_earnings", "FLOAT"),
+            bigquery.SchemaField("impressions", "INTEGER"),
+            bigquery.SchemaField("impression_ctr", "FLOAT"),
+            bigquery.SchemaField("matched_requests", "INTEGER"),
+            bigquery.SchemaField("match_rate", "FLOAT"),
+            bigquery.SchemaField("observed_ecpm", "FLOAT"),
+        ],
+        max_bad_records=0,  # fail fast on parse issues :contentReference[oaicite:7]{index=7}
     )
-    load_job = client.load_table_from_uri(gcs_uri, table_ref, job_config=job_config)  # start job :contentReference[oaicite:21]{index=21}
-    try:
-        load_job.result()  # wait :contentReference[oaicite:22]{index=22}
-        print(f"Loaded {load_job.output_rows} rows into {project}.{dataset}.{table}")
-    except BadRequest as e:
-        # Print row-level errors for diagnosis
-        print("Load job failed with the following errors:")
-        for err in load_job.errors:
-            print(f"  Row {err.get('rowNumber')}: {err.get('message')}")
-        raise
+    load_job = client.load_table_from_uri(uri, table_ref, job_config=job_config)
+    load_job.result()  # wait for completion :contentReference[oaicite:8]{index=8}
+    print("Loaded CSV into BigQuery")
 
-# ─── MAIN FLOW ────────────────────────────────────────────────────────────────
 def main():
     creds       = get_admob_creds()
-    service     = build_admob_service(creds)
+    service     = build_service(creds)
     report_date = date.today() - timedelta(days=1)
-
-    rows = fetch_rows(service, PUBLISHER_ID, report_date)
-    if not rows:
-        print(f"No data for {report_date}")
-        return
-
-    csv_file = f"mediation_{report_date:%Y%m%d}.csv"
-    write_csv(csv_file, rows)
-    gcs_uri = upload_to_gcs(csv_file, BUCKET_NAME)
-    load_csv_to_bq(gcs_uri, PROJECT, DATASET, TABLE)
+    rows        = fetch_mediation(service, PUBLISHER_ID, report_date)
+    filename    = f"mediation_{report_date:%Y%m%d}.csv"
+    upload_csv_to_gcs(rows, filename)
+    load_csv_to_bq(filename)
 
 if __name__ == "__main__":
     main()
