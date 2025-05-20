@@ -50,7 +50,36 @@ def get_admob_creds():
 def build_service(creds):
     return build("admob", "v1", credentials=creds, cache_discovery=False)
 
-# ─── FETCH & WRITE CSV ─────────────────────────────────────────────────────────
+def get_int(mv, key):
+    """Safely extract an integer from metricValues[key]. Defaults to 0."""
+    d = mv.get(key, {}) or {}
+    if "integerValue" in d and d["integerValue"] is not None:
+        return int(d["integerValue"])
+    if "microsValue" in d and d["microsValue"] is not None:
+        return int(d["microsValue"])
+    # some metrics return as decimalValue strings
+    val = d.get("decimalValue")
+    if val is not None:
+        try:
+            return int(float(val))
+        except ValueError:
+            return 0
+    return 0
+
+def get_float(mv, key):
+    """Safely extract a float from metricValues[key]. Defaults to 0.0."""
+    d = mv.get(key, {}) or {}
+    if "doubleValue" in d and d["doubleValue"] is not None:
+        return float(d["doubleValue"])
+    # fallback if the API ever returns string in 'value'
+    val = d.get("value")
+    if val is not None:
+        try:
+            return float(val)
+        except ValueError:
+            return 0.0
+    return 0.0
+
 def fetch_and_write_csv(service, account_name, report_date, local_path):
     spec = {
         "dateRange": {
@@ -58,8 +87,7 @@ def fetch_and_write_csv(service, account_name, report_date, local_path):
             "endDate":   {"year": report_date.year, "month": report_date.month, "day": report_date.day},
         },
         "dimensions": [
-            "DATE",
-            "APP", "AD_UNIT",
+            "DATE", "APP", "AD_UNIT",
             "AD_SOURCE", "AD_SOURCE_INSTANCE", "MEDIATION_GROUP",
             "COUNTRY"
         ],
@@ -75,28 +103,22 @@ def fetch_and_write_csv(service, account_name, report_date, local_path):
         body={"reportSpec": spec}
     ).execute()
 
-    # Open CSV with newline='' so csv.writer handles line endings itself :contentReference[oaicite:6]{index=6}
     with open(local_path, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
-        # Header row
-        header = [
+        writer.writerow([
             "date", "app", "ad_unit", "ad_source", "ad_source_instance",
             "mediation_group", "country",
             "ad_requests", "clicks", "estimated_earnings_micros", "impressions",
             "impression_ctr", "matched_requests", "match_rate", "observed_ecpm_micros"
-        ]
-        writer.writerow(header)
+        ])
 
-        # The response is a list of chunks: first is header, last footer; only chunks with "row" are data :contentReference[oaicite:7]{index=7}
         for chunk in resp:
             if "row" not in chunk:
                 continue
-            r = chunk["row"]
-            dv = r["dimensionValues"]
-            mv = r["metricValues"]
+            dv = chunk["row"]["dimensionValues"]
+            mv = chunk["row"]["metricValues"]
 
-            # Convert AdMob "YYYYMMDD" string to "YYYY-MM-DD" for BigQuery DATE :contentReference[oaicite:8]{index=8}
-            raw_date = dv["DATE"]["value"]  # e.g. "20250515"
+            raw_date = dv["DATE"]["value"]
             iso_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
 
             writer.writerow([
@@ -107,59 +129,50 @@ def fetch_and_write_csv(service, account_name, report_date, local_path):
                 dv["AD_SOURCE_INSTANCE"]["value"],
                 dv["MEDIATION_GROUP"]["value"],
                 dv["COUNTRY"]["value"],
-                int(mv["AD_REQUESTS"]["integerValue"]),
-                int(mv["CLICKS"]["integerValue"]),
-                int(float(mv["ESTIMATED_EARNINGS"].get("micros", mv["ESTIMATED_EARNINGS"].get("decimalValue")))),
-                int(mv["IMPRESSIONS"]["integerValue"]),
-                float(mv["IMPRESSION_CTR"]["doubleValue"]),
-                int(mv["MATCHED_REQUESTS"]["integerValue"]),
-                float(mv["MATCH_RATE"]["doubleValue"]),
-                int(float(mv["OBSERVED_ECPM"].get("micros", mv["OBSERVED_ECPM"].get("decimalValue")))),
+                get_int(mv, "AD_REQUESTS"),
+                get_int(mv, "CLICKS"),
+                get_int(mv, "ESTIMATED_EARNINGS"),
+                get_int(mv, "IMPRESSIONS"),
+                get_float(mv, "IMPRESSION_CTR"),
+                get_int(mv, "MATCHED_REQUESTS"),
+                get_float(mv, "MATCH_RATE"),
+                get_int(mv, "OBSERVED_ECPM"),
             ])
 
     print(f"Wrote CSV to {local_path}")
     return local_path
 
-# ─── UPLOAD TO GCS ─────────────────────────────────────────────────────────────
+# ─── UPLOAD + BQ LOAD (unchanged) ───────────────────────────────────────────────
 def upload_to_gcs(local_path, bucket_name):
-    client = storage.Client()                   # storage.Client() uses Application Default Credentials
+    client = storage.Client()
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(os.path.basename(local_path))
-    blob.upload_from_filename(local_path)       # Upload from local file :contentReference[oaicite:9]{index=9}
-    gcs_uri = f"gs://{bucket_name}/{os.path.basename(local_path)}"
-    print(f"Uploaded {local_path} → {gcs_uri}")
-    return gcs_uri
+    blob.upload_from_filename(local_path)
+    uri = f"gs://{bucket_name}/{os.path.basename(local_path)}"
+    print(f"Uploaded {local_path} → {uri}")
+    return uri
 
-# ─── LOAD CSV TO BIGQUERY ───────────────────────────────────────────────────────
-def load_csv_to_bq(gcs_uri, project, dataset_id, table_id):
+def load_csv_to_bq(gcs_uri, project, dataset, table):
     client = bigquery.Client(project=project)
-    table_ref = client.dataset(dataset_id).table(table_id)
-
+    table_ref = client.dataset(dataset).table(table)
     job_config = bigquery.LoadJobConfig(
         source_format=bigquery.SourceFormat.CSV,
-        skip_leading_rows=1,  # ignore header row :contentReference[oaicite:10]{index=10}
-        autodetect=False      # assume table already exists with correct schema
+        skip_leading_rows=1,
+        autodetect=False,       # or True, or define explicit schema
+        write_disposition="WRITE_TRUNCATE"
     )
+    load_job = client.load_table_from_uri(gcs_uri, table_ref, job_config=job_config)
+    load_job.result()
+    print(f"Loaded into {project}.{dataset}.{table}")
 
-    load_job = client.load_table_from_uri(
-        gcs_uri,
-        table_ref,
-        job_config=job_config
-    )
-
-    load_job.result()  # Waits for job to complete
-    print(f"Loaded {gcs_uri} into {project}:{dataset_id}.{table_id}")
-
-# ─── MAIN ───────────────────────────────────────────────────────────────────────
 def main():
     creds       = get_admob_creds()
     service     = build_service(creds)
     report_date = date.today() - timedelta(days=1)
+    local_csv   = f"mediation_{report_date:%Y%m%d}.csv"
 
-    local_csv = f"mediation_{report_date:%Y%m%d}.csv"
-    fetch_and_write_csv(service, PUBLISHER_ID, report_date, local_csv)
-
-    gcs_uri = upload_to_gcs(local_csv, BUCKET_NAME)
+    csv_path    = fetch_and_write_csv(service, PUBLISHER_ID, report_date, local_csv)
+    gcs_uri     = upload_to_gcs(csv_path, BUCKET_NAME)
     load_csv_to_bq(gcs_uri, PROJECT, DATASET_NAME, TABLE_NAME)
 
 if __name__ == "__main__":
