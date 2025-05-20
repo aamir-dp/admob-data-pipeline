@@ -188,12 +188,13 @@ def load_csv_to_bq(gcs_uri: str, project: str, dataset: str, table: str):
         source_format=bigquery.SourceFormat.CSV,
         skip_leading_rows=1,
         autodetect=False,
-        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
+        create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
     )
 
     load_job = client.load_table_from_uri(gcs_uri, table_ref, job_config=job_config)
     load_job.result()  # wait for completion
-    print(f"Loaded data into {project}.{dataset}.{table}")
+    print(f"Appended data into {project}.{dataset}.{table}")
 
 # ─── MAIN ───────────────────────────────────────────────────────────────────────
 def main():
