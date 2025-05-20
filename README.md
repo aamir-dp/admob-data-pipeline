@@ -47,8 +47,9 @@ This document provides a comprehensive guide to setting up and maintaining an au
 [BigQuery] → Load table with schema
 ```
 
-![Diagram](diagram.png)
-``` :contentReference[oaicite:3]{index=3}.
+<p align="left">
+  <img src="diagram.png" alt="Diagram" width="400" height="600"/>
+</p>
 
 ## Configuration
 
