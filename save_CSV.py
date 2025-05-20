@@ -1,12 +1,21 @@
 import os
 import csv
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
 from google.cloud import storage, bigquery
+
+raw = os.getenv("REPORT_DATE") or os.getenv("INPUT_RUN_DATE")
+if raw:
+    # if someone set REPORT_DATE (or passed INPUT_RUN_DATE in a manual run)
+    report_date = datetime.strptime(raw, "%Y-%m-%d").date()
+else:
+    # scheduled run → fallback to yesterday
+    report_date = date.today() - timedelta(days=1)
+
 
 # ─── CONFIGURATION & VALIDATION ───────────────────────────────────────────────
 # Make sure these environment variables are set in your GitHub repo or shell:
