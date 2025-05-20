@@ -80,14 +80,16 @@ def get_float(mv, key):
             return 0.0
     return 0.0
 
-def fetch_and_write_csv(service, account_name, report_date, local_path):
+def fetch_and_write_csv(service, publisher_id, report_date, csv_path):
     spec = {
         "dateRange": {
-            "startDate": {"year": report_date.year, "month": report_date.month, "day": report_date.day},
-            "endDate":   {"year": report_date.year, "month": report_date.month, "day": report_date.day},
+            "startDate": {"year": report_date.year,  "month": report_date.month, "day": report_date.day},
+            "endDate":   {"year": report_date.year,  "month": report_date.month, "day": report_date.day},
         },
+        # Only one time dimension allowed: DATE :contentReference[oaicite:1]{index=1}
         "dimensions": [
-            "DATE", "APP", "AD_UNIT",
+            "DATE",
+            "APP", "AD_UNIT",
             "AD_SOURCE", "AD_SOURCE_INSTANCE", "MEDIATION_GROUP",
             "COUNTRY"
         ],
@@ -98,49 +100,56 @@ def fetch_and_write_csv(service, account_name, report_date, local_path):
         "sortConditions": [{"dimension": "DATE", "order": "ASCENDING"}]
     }
 
-    resp = service.accounts().mediationReport().generate(
-        parent=f"accounts/{account_name}",
+    request  = service.accounts().mediationReport().generate(
+        parent=f"accounts/{publisher_id}",
         body={"reportSpec": spec}
-    ).execute()
+    )
+    response = request.execute()  # streaming list of chunks
 
-    with open(local_path, "w", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow([
-            "date", "app", "ad_unit", "ad_source", "ad_source_instance",
-            "mediation_group", "country",
-            "ad_requests", "clicks", "estimated_earnings_micros", "impressions",
-            "impression_ctr", "matched_requests", "match_rate", "observed_ecpm_micros"
-        ])
+    headers = [
+        "date",
+        "app_name", "ad_unit_name",
+        "ad_source_name", "ad_source_instance_name", "mediation_group_name",
+        "country",
+        "ad_requests","clicks","estimated_earnings_micros","impressions",
+        "impression_ctr","matched_requests","match_rate","observed_ecpm_micros"
+    ]
 
-        for chunk in resp:
-            if "row" not in chunk:
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+
+        for chunk in response:
+            row = chunk.get("row")
+            if not row:
                 continue
-            dv = chunk["row"]["dimensionValues"]
-            mv = chunk["row"]["metricValues"]
 
-            raw_date = dv["DATE"]["value"]
-            iso_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
+            dims = row["dimensionValues"]
+            mets = row["metricValues"]
 
-            writer.writerow([
-                iso_date,
-                dv["APP"]["value"],
-                dv["AD_UNIT"]["value"],
-                dv["AD_SOURCE"]["value"],
-                dv["AD_SOURCE_INSTANCE"]["value"],
-                dv["MEDIATION_GROUP"]["value"],
-                dv["COUNTRY"]["value"],
-                get_int(mv, "AD_REQUESTS"),
-                get_int(mv, "CLICKS"),
-                get_int(mv, "ESTIMATED_EARNINGS"),
-                get_int(mv, "IMPRESSIONS"),
-                get_float(mv, "IMPRESSION_CTR"),
-                get_int(mv, "MATCHED_REQUESTS"),
-                get_float(mv, "MATCH_RATE"),
-                get_int(mv, "OBSERVED_ECPM"),
-            ])
+            def display(dim_key):
+                dv = dims.get(dim_key, {})
+                return dv.get("displayLabel") or dv.get("value")
 
-    print(f"Wrote CSV to {local_path}")
-    return local_path
+            # pull displayLabels (or fall back to raw IDs)
+            csv_row = [
+                dims["DATE"]["value"],
+                display("APP"),           # My App Name :contentReference[oaicite:2]{index=2}
+                display("AD_UNIT"),       # My Ad Unit Name :contentReference[oaicite:3]{index=3}
+                display("AD_SOURCE"),     # e.g. “AdMob (Default)” :contentReference[oaicite:4]{index=4}
+                display("AD_SOURCE_INSTANCE"),
+                display("MEDIATION_GROUP"),
+                dims["COUNTRY"]["value"],
+                mets["AD_REQUESTS"]["value"],
+                mets["CLICKS"]["value"],
+                mets["ESTIMATED_EARNINGS"]["micros"],
+                mets["IMPRESSIONS"]["value"],
+                mets["IMPRESSION_CTR"]["value"],
+                mets["MATCHED_REQUESTS"]["value"],
+                mets["MATCH_RATE"]["value"],
+                mets["OBSERVED_ECPM"]["micros"],
+            ]
+            writer.writerow(csv_row)
 
 # ─── UPLOAD + BQ LOAD (unchanged) ───────────────────────────────────────────────
 def upload_to_gcs(local_path, bucket_name):
