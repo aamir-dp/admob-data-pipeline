@@ -15,6 +15,7 @@ jobs:
 
     # Inject everything here; note publisher ID is now a secret
     env:
+      REPORT_DATE:          ${{ github.event.inputs.run_date }}
       ADMOB_CLIENT_ID:      ${{ secrets.ADMOB_CLIENT_ID }}
       ADMOB_CLIENT_SECRET:  ${{ secrets.ADMOB_CLIENT_SECRET }}
       ADMOB_REFRESH_TOKEN:  ${{ secrets.ADMOB_REFRESH_TOKEN }}

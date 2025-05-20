@@ -197,14 +197,12 @@ def load_csv_to_bq(gcs_uri: str, project: str, dataset: str, table: str):
 
 # ─── MAIN ───────────────────────────────────────────────────────────────────────
 def main():
-    creds       = get_admob_creds()
-    service     = build_service(creds)
-    report_date = date.today() - timedelta(days=1)
+    creds   = get_admob_creds()
+    service = build_service(creds)
 
     local_csv = f"mediation_{report_date:%Y%m%d}.csv"
     fetch_and_write_csv(service, PUBLISHER_ID, report_date, local_csv)
-
-    gcs_uri = upload_to_gcs(local_csv, BUCKET_NAME)
+    gcs_uri   = upload_to_gcs(local_csv, BUCKET_NAME)
     load_csv_to_bq(gcs_uri, PROJECT, DATASET_NAME, TABLE_NAME)
 
 if __name__ == "__main__":
