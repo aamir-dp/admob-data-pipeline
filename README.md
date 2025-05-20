@@ -47,7 +47,7 @@ This document provides a comprehensive guide to setting up and maintaining an au
 [BigQuery] → Load table with schema
 ```
 
-![Diagram](workflow diagram.png)
+![Diagram](diagram.png)
 ``` :contentReference[oaicite:3]{index=3}.
 
 ## Configuration
