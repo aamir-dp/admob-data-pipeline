@@ -16,6 +16,13 @@ else:
     # scheduled run → fallback to yesterday
     report_date = date.today() - timedelta(days=1)
 
+# ─── WHICH APPS TO REPORT ───────────────────────────────────────────────────────
+APP1 = os.getenv("APP1")
+APP2 = os.getenv("APP2")
+if not APP1 or not APP2:
+    raise RuntimeError("Missing required env vars APP1 and/or APP2")
+
+
 
 # ─── CONFIGURATION & VALIDATION ───────────────────────────────────────────────
 # Make sure these environment variables are set in your GitHub repo or shell:
@@ -110,7 +117,19 @@ def fetch_and_write_csv(service, publisher_id: str, report_date: date, local_pat
             "AD_REQUESTS", "CLICKS", "ESTIMATED_EARNINGS", "IMPRESSIONS",
             "IMPRESSION_CTR", "MATCHED_REQUESTS", "MATCH_RATE", "OBSERVED_ECPM"
         ],
-        "sortConditions": [{"dimension": "DATE", "order": "ASCENDING"}]
+        "sortConditions": [{"dimension": "DATE", "order": "ASCENDING"}],
+        "dimensionFilters": [
+        {
+            "dimension": "APP",
+            "matchesAny": {
+                "values": [
+                    {"value": APP1},
+                    {"value": APP2},
+                ]
+            }
+        }
+    ]
+        
     }
 
     response = service.accounts().mediationReport().generate(
