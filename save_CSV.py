@@ -123,8 +123,8 @@ def fetch_and_write_csv(service, publisher_id: str, report_date: date, local_pat
             "dimension": "APP",
             "matchesAny": {
                 "values": [
-                    {"value": APP1},
-                    {"value": APP2},
+                    APP1,
+                    APP2,
                 ]
             }
         }
