@@ -34,4 +34,4 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run Network Report pipeline
-        run: python save_csv.py
+        run: python save_network_CSV.py
