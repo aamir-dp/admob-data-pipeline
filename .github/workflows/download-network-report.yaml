@@ -1,0 +1,37 @@
+name: Daily AdMob Network Report
+
+on:
+  schedule:
+    # runs each day at 02:00 UTC (07:00 PKT)
+    - cron: '0 2 * * *'
+
+jobs:
+  network-report:
+    runs-on: ubuntu-latest
+    env:
+      GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+      ADMOB_CLIENT_ID:     ${{ secrets.ADMOB_CLIENT_ID }}
+      ADMOB_CLIENT_SECRET: ${{ secrets.ADMOB_CLIENT_SECRET }}
+      ADMOB_REFRESH_TOKEN: ${{ secrets.ADMOB_REFRESH_TOKEN }}
+      ADMOB_PUBLISHER_ID:  ${{ secrets.ADMOB_PUBLISHER_ID }}
+      GCP_PROJECT:         ${{ secrets.GCP_PROJECT }}
+      GCS_BUCKET_NAME:     ${{ secrets.GCS_BUCKET_NAME }}
+      BQ_DATASET:          ${{ secrets.BQ_DATASET }}
+      BQ_TABLE_NETWORK:    ${{ secrets.BQ_TABLE_NETWORK }}
+      APP1:                ${{ secrets.APP1 }}
+      APP2:                ${{ secrets.APP2 }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Network Report pipeline
+        run: python save_csv.py
