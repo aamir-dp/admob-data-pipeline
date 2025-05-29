@@ -4,6 +4,12 @@ on:
   schedule:
     # runs each day at 02:00 UTC (07:00 PKT)
     - cron: '0 2 * * *'
+  workflow_dispatch:        # still allows manual runs with inputs
+    inputs:
+      run_date:
+        description: 'Date for report (YYYY-MM-DD)'
+        required: false    # make it optional
+
 
 jobs:
   network-report:
