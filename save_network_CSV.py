@@ -33,9 +33,9 @@ required = {
     "GCP_PROJECT":         os.getenv("GCP_PROJECT"),
     "GCS_BUCKET_NAME":     os.getenv("GCS_BUCKET_NAME"),
     "BQ_DATASET":          os.getenv("BQ_DATASET"),
-    "BQ_TABLE_NETWORK":            os.getenv("BQ_TABLE_NETWORK"),
+    "BQ_TABLE_NETWORK":    os.getenv("BQ_TABLE_NETWORK"),
 }
-missing = [k for k,v in required.items() if not v]
+missing = [k for k, v in required.items() if not v]
 if missing:
     raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
@@ -143,7 +143,7 @@ def fetch_and_write_network_csv(service, publisher_id: str, report_date: date, l
             mets = row.get("metricValues", {})
 
             raw = dims.get("DATE", {}).get("value", "")
-            iso_date = f"{raw[:4]}-{raw[4:6]}-{raw[6:]}" if len(raw)==8 else raw
+            iso_date = f"{raw[:4]}-{raw[4:6]}-{raw[6:]}" if len(raw) == 8 else raw
 
             writer.writerow([
                 iso_date,
@@ -174,22 +174,41 @@ def upload_to_gcs(local_path: str, bucket_name: str) -> str:
     print(f"Uploaded {local_path} → {uri}")
     return uri
 
-# ─── LOAD INTO BQ ──────────────────────────────────────────────────────────────
-def load_csv_to_bq(gcs_uri: str, project: str, dataset: str, table: str):
-    client = bigquery.Client(project=project)
-    table_ref = client.dataset(dataset).table(table)
+# ─── DELETE EXISTING ROWS FOR THE DATE ──────────────────────────────────────────
+def delete_existing_date(client: bigquery.Client, project: str, dataset: str, table: str, report_date: date):
+    """
+    Deletes any rows in project.dataset.table whose date = report_date.
+    """
+    table_fq = f"`{project}.{dataset}.{table}`"
+    sql = f"""
+      DELETE FROM {table_fq}
+      WHERE date = '{report_date.isoformat()}'
+    """
+    query_job = client.query(sql)
+    query_job.result()  # wait for deletion to finish
+    print(f"Deleted rows for date = {report_date} from {table_fq}")
 
+# ─── LOAD INTO BQ (WITH DELETE FIRST) ──────────────────────────────────────────
+def load_csv_to_bq(gcs_uri: str, project: str, dataset: str, table: str, report_date: date):
+    client = bigquery.Client(project=project)
+
+    # 1) DELETE any existing rows for this date (so we don’t append duplicates)
+    delete_existing_date(client, project, dataset, table, report_date)
+
+    # 2) Configure the LoadJob as before (WRITE_APPEND)
+    table_ref = client.dataset(dataset).table(table)
     job_config = bigquery.LoadJobConfig(
-        source_format=bigquery.SourceFormat.CSV,
-        skip_leading_rows=1,
-        autodetect=False,
-        write_disposition=bigquery.WriteDisposition.WRITE_APPEND,
-        create_disposition=bigquery.CreateDisposition.CREATE_IF_NEEDED,
+        source_format       = bigquery.SourceFormat.CSV,
+        skip_leading_rows   = 1,
+        autodetect          = False,
+        write_disposition   = bigquery.WriteDisposition.WRITE_APPEND,
+        create_disposition  = bigquery.CreateDisposition.CREATE_IF_NEEDED,
     )
 
+    # 3) Actually load the CSV from GCS
     load_job = client.load_table_from_uri(gcs_uri, table_ref, job_config=job_config)
-    load_job.result()
-    print(f"Appended data into {project}.{dataset}.{table}")
+    load_job.result()  # wait for load to finish
+    print(f"Appended data into {project}.{dataset}.{table} for date {report_date}")
 
 # ─── MAIN ───────────────────────────────────────────────────────────────────────
 def main():
@@ -199,7 +218,7 @@ def main():
     local_csv = f"network_{report_date:%Y%m%d}.csv"
     fetch_and_write_network_csv(service, PUBLISHER_ID, report_date, local_csv)
     gcs_uri = upload_to_gcs(local_csv, BUCKET_NAME)
-    load_csv_to_bq(gcs_uri, PROJECT, DATASET_NAME, TABLE_NAME)
+    load_csv_to_bq(gcs_uri, PROJECT, DATASET_NAME, TABLE_NAME, report_date)
 
 if __name__ == "__main__":
     main()
