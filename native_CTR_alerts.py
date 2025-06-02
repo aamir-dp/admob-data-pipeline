@@ -15,8 +15,8 @@ raw = os.getenv("REPORT_DATE") or os.getenv("INPUT_RUN_DATE")
 if raw:
     report_date = datetime.strptime(raw, "%Y-%m-%d").date()
 else:
-    # default to yesterday UTC
-    report_date = date.today() - timedelta(days=1)
+    # default to today UTC
+    report_date = date.today()
 
 # ─── WHICH APPS TO REPORT ───────────────────────────────────────────────────────
 APP1 = os.getenv("APP1")
