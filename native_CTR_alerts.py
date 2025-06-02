@@ -219,13 +219,16 @@ def check_native_ctr_alert(project: str, dataset: str, table: str, report_date: 
     client = bigquery.Client(project=project)
     table_fq = f"`{project}.{dataset}.{table}`"
 
-    # Build the comparison query
+    # Build the comparison query (now using SUM(clicks)/SUM(impressions))
     sql = f"""
     WITH
       last7 AS (
         SELECT
           ad_unit_name,
-          AVG(impression_ctr) AS avg_ctr_7d
+          SAFE_DIVIDE(
+            SUM(clicks),
+            SUM(impressions)
+          ) AS avg_ctr_7d
         FROM
           {table_fq}
         WHERE
@@ -273,7 +276,10 @@ def check_native_ctr_alert(project: str, dataset: str, table: str, report_date: 
         ad = row.ad_unit_name
         change = row.pct_change
         direction = "above" if change > 0 else "below"
-        alerts.append(f"• `{ad}` is {direction} 25% of 7-day avg (avg={row.avg_ctr_7d:.4f}, today={row.today_ctr:.4f}, {change:+.2f}% )")
+        alerts.append(
+            f"• `{ad}` is {direction} 25% of 7-day avg "
+            f"(avg={row.avg_ctr_7d:.4f}, today={row.today_ctr:.4f}, {change:+.2f}% )"
+        )
 
     if not alerts:
         print("No native CTR spikes detected.")
