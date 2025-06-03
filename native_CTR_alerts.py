@@ -214,7 +214,7 @@ def load_csv_to_bq(gcs_uri: str, project: str, dataset: str, table: str, report_
 # ─── NATIVE CTR SPIKE ALERT ─────────────────────────────────────────────────────
 def check_native_ctr_alert(project: str, dataset: str, table: str, report_date: date, webhook_url: str, ad_units: list):
     """
-    Queries BQ for any 'native' ad_unit_name in ad_units whose impression_ctr on report_date
+    Queries BQ for any ad_unit_name in ad_units whose impression_ctr on report_date
     differs by more than 25% from its trailing 7-day average (clicks/impressions).
     Sends a Slack alert grouped by app_name. If no anomalies, reports them.
     """
@@ -232,8 +232,7 @@ def check_native_ctr_alert(project: str, dataset: str, table: str, report_date: 
           SAFE_DIVIDE(SUM(clicks), SUM(impressions)) AS avg_ctr_7d
         FROM {table_fq}
         WHERE
-          format = 'native'
-          AND ad_unit_name IN ({placeholder_list})
+          ad_unit_name IN ({placeholder_list})
           AND date BETWEEN
             DATE_SUB('{report_date.isoformat()}', INTERVAL 7 DAY)
             AND DATE_SUB('{report_date.isoformat()}', INTERVAL 1 DAY)
@@ -247,8 +246,7 @@ def check_native_ctr_alert(project: str, dataset: str, table: str, report_date: 
           impression_ctr AS today_ctr
         FROM {table_fq}
         WHERE
-          format = 'native'
-          AND ad_unit_name IN ({placeholder_list})
+          ad_unit_name IN ({placeholder_list})
           AND date = '{report_date.isoformat()}'
       )
     SELECT
@@ -284,16 +282,36 @@ def check_native_ctr_alert(project: str, dataset: str, table: str, report_date: 
         alerts_by_app.setdefault(app, []).append(line)
 
     if not alerts_by_app:
-        # No anomalies: list all ad units
-        text = (f"*Native CTR Spike Alert for {report_date.isoformat()}*\n"
-                "No anomalies detected for the following ad units:\n"
-                + "\n".join(f"• {au}" for au in ad_units))
+        # No anomalies: fetch each ad_unit_name’s display label for today (or fallback to ID)
+        placeholder_ids = ", ".join(f"'{au}'" for au in ad_units)
+        sql_labels = f"""
+        SELECT
+          DISTINCT ad_unit_name
+        FROM {table_fq}
+        WHERE
+          ad_unit_name IN ({placeholder_ids})
+          AND date = '{report_date.isoformat()}'
+        """
+        label_job = client.query(sql_labels)
+        label_rows = label_job.result()
+
+        display_list = [row.ad_unit_name for row in label_rows]
+        # if some IDs had no matching row, include them as-is
+        for au in ad_units:
+            if au not in display_list:
+                display_list.append(au)
+
+        text = (
+            f"*Native CTR Spike Alert for {report_date.isoformat()}*\n"
+            "No anomalies detected for the following ad units:\n"
+            + "\n".join(f"• {label}" for label in display_list)
+        )
         payload = {"text": text}
         resp = requests.post(webhook_url, json=payload, timeout=10)
         if resp.status_code != 200:
             print(f"Failed to post to Slack (status {resp.status_code}): {resp.text}")
         else:
-            print("Posted 'no anomalies' message to Slack.")
+            print("Posted 'no anomalies' message to Slack (with display labels).")
         return
 
     # Build Slack message for anomalies
