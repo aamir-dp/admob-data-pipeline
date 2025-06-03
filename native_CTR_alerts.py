@@ -216,12 +216,11 @@ def check_native_ctr_alert(project: str, dataset: str, table: str, report_date: 
     """
     Queries BQ for any 'native' ad_unit_name in ad_units whose impression_ctr on report_date
     differs by more than 25% from its trailing 7-day average (clicks/impressions).
-    Sends a Slack alert grouped by app_name.
+    Sends a Slack alert grouped by app_name. If no anomalies, reports them.
     """
     client = bigquery.Client(project=project)
     table_fq = f"`{project}.{dataset}.{table}`"
 
-    # Format ad_unit_ids list for SQL IN clause
     placeholder_list = ", ".join(f"'{au}'" for au in ad_units)
 
     sql = f"""
@@ -273,7 +272,6 @@ def check_native_ctr_alert(project: str, dataset: str, table: str, report_date: 
     query_job = client.query(sql)
     results = query_job.result()
 
-    # Group alerts by app_name
     alerts_by_app = {}
     for row in results:
         app = row.app_name
@@ -286,10 +284,19 @@ def check_native_ctr_alert(project: str, dataset: str, table: str, report_date: 
         alerts_by_app.setdefault(app, []).append(line)
 
     if not alerts_by_app:
-        print("No native CTR spikes detected.")
+        # No anomalies: list all ad units
+        text = (f"*Native CTR Spike Alert for {report_date.isoformat()}*\n"
+                "No anomalies detected for the following ad units:\n"
+                + "\n".join(f"• {au}" for au in ad_units))
+        payload = {"text": text}
+        resp = requests.post(webhook_url, json=payload, timeout=10)
+        if resp.status_code != 200:
+            print(f"Failed to post to Slack (status {resp.status_code}): {resp.text}")
+        else:
+            print("Posted 'no anomalies' message to Slack.")
         return
 
-    # Build Slack message
+    # Build Slack message for anomalies
     sections = [f"*Native CTR Spike Alert for {report_date.isoformat()}*"]
     for app, lines in alerts_by_app.items():
         sections.append(f"\nApp name: {app}\n")
