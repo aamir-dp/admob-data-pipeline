@@ -2,7 +2,7 @@ name: 📊 AdMob Network → BigQuery + Native CTR Alerts
 
 on:
   schedule:
-    # runs at 00:00, 05:00, 10:00, 15:00, 20:00 UTC (≈05:00, 10:00, 15:00, 20:00, 01:00 PKT)
+    # Runs five times per day at 00:00, 05:00, 10:00, 15:00, 20:00 UTC
     - cron: '0 0,5,10,15,20 * * *'
   workflow_dispatch:
     inputs:
@@ -28,6 +28,7 @@ jobs:
       BQ_DATASET:           ${{ secrets.BQ_DATASET }}
       BQ_TABLE_NETWORK:     ${{ secrets.BQ_TABLE_NETWORK }}
       SLACK_WEBHOOK_URL:    ${{ secrets.SLACK_WEBHOOK_URL }}
+      AD_UNIT_ID:           ${{ secrets.AD_UNIT_ID }}
 
     steps:
       - name: Checkout repository
@@ -55,7 +56,7 @@ jobs:
 
       - name: Check required env vars
         run: |
-          for var in ADMOB_PUBLISHER_ID APP1 APP2 GCP_PROJECT GCS_BUCKET_NAME BQ_DATASET BQ_TABLE_NETWORK SLACK_WEBHOOK_URL; do
+          for var in ADMOB_PUBLISHER_ID APP1 APP2 GCP_PROJECT GCS_BUCKET_NAME BQ_DATASET BQ_TABLE_NETWORK SLACK_WEBHOOK_URL AD_UNIT_ID; do
             if [ -z "${!var}" ]; then
               echo "❌ ERROR: $var is empty or not set!"
               exit 1
