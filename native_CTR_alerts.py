@@ -19,11 +19,10 @@ else:
     report_date = date.today()
 
 # ─── WHICH APPS TO REPORT ───────────────────────────────────────────────────────
-APP1 = os.getenv("APP1")
-APP2 = os.getenv("APP2")
-if not APP1 or not APP2:
-    raise RuntimeError("Missing required env vars APP1 and/or APP2")
-APP_LIST = [APP1, APP2]
+raw_apps = os.getenv("APPS", "")
+APP_LIST = [line.strip() for line in raw_apps.splitlines() if line.strip()]
+if not APP_LIST:
+    raise RuntimeError("Missing required env var APPS")
 
 # ─── AD UNIT FILTER ─────────────────────────────────────────────────────────────
 raw_ad_units = os.getenv("AD_UNIT_ID", "")
@@ -40,6 +39,7 @@ required = {
     "BQ_DATASET":          os.getenv("BQ_DATASET"),
     "BQ_TABLE_NETWORK":    os.getenv("BQ_TABLE_NETWORK"),
     "SLACK_WEBHOOK_URL":   os.getenv("SLACK_WEBHOOK_URL"),
+    "APPS":                raw_apps,
     "AD_UNIT_ID":          raw_ad_units
 }
 missing = [k for k, v in required.items() if not v]

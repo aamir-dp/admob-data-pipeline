@@ -20,9 +20,7 @@ jobs:
       ADMOB_CLIENT_SECRET:  ${{ secrets.ADMOB_CLIENT_SECRET }}
       ADMOB_REFRESH_TOKEN:  ${{ secrets.ADMOB_REFRESH_TOKEN }}
       ADMOB_PUBLISHER_ID:   ${{ secrets.ADMOB_PUBLISHER_ID }}
-      APP1:                 ${{ secrets.APP1 }}
-      APP2:                 ${{ secrets.APP2 }}
-
+      APPS:                 ${{ secrets.APPS }}
       GCP_PROJECT:          ${{ secrets.GCP_PROJECT }}
       GCS_BUCKET_NAME:      ${{ secrets.GCS_BUCKET_NAME }}
       BQ_DATASET:           ${{ secrets.BQ_DATASET }}
