@@ -54,7 +54,8 @@ jobs:
 
       - name: Check required env vars
         run: |
-          for var in ADMOB_PUBLISHER_ID APP1 APP2 GCP_PROJECT GCS_BUCKET_NAME BQ_DATASET BQ_TABLE_NETWORK SLACK_WEBHOOK_URL AD_UNIT_ID; do
+          run: |
+          for var in ADMOB_PUBLISHER_ID APPS AD_UNIT_ID GCP_PROJECT GCS_BUCKET_NAME BQ_DATASET BQ_TABLE_NETWORK SLACK_WEBHOOK_URL; do
             if [ -z "${!var}" ]; then
               echo "❌ ERROR: $var is empty or not set!"
               exit 1
