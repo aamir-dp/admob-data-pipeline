@@ -1,0 +1,66 @@
+name: 📊 Native CTR Alerts VPN
+
+on:
+  schedule:
+    # Runs every hour per day - UTC
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    inputs:
+      run_date:
+        description: 'Date for report (YYYY-MM-DD)'
+        required: false
+
+jobs:
+  fetch-and-alert:
+    runs-on: ubuntu-latest
+
+    env:
+      REPORT_DATE:          ${{ github.event.inputs.run_date }}
+      ADMOB_CLIENT_ID:      ${{ secrets.ADMOB_CLIENT_ID }}
+      ADMOB_CLIENT_SECRET:  ${{ secrets.ADMOB_CLIENT_SECRET }}
+      ADMOB_REFRESH_TOKEN:  ${{ secrets.ADMOB_REFRESH_TOKEN_3866251076647448 }}
+      ADMOB_PUBLISHER_ID:   ${{ secrets.ADMOB_PUBLISHER_ID_3866251076647448 }}
+      APPS:                 ${{ secrets.APPS_3866251076647448 }}
+      GCP_PROJECT:          ${{ secrets.GCP_PROJECT }}
+      GCS_BUCKET_NAME:      ${{ secrets.GCS_BUCKET_NAME_3866251076647448 }}
+      BQ_DATASET:           ${{ secrets.BQ_DATASET }}
+      BQ_TABLE_NETWORK:     ${{ secrets.BQ_TABLE_NETWORK_3866251076647448 }}
+      SLACK_WEBHOOK_URL:    ${{ secrets.SLACK_WEBHOOK_URL }}
+      AD_UNIT_ID:           ${{ secrets.AD_UNIT_ID_3866251076647448 }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Authenticate to GCP (for GCS & BigQuery)
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Python 3.9
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Dump environment variables
+        run: |
+          echo "=== ENVIRONMENT DUMP ==="
+          env
+
+      - name: Check required env vars
+        run: |
+          run: |
+          for var in ADMOB_PUBLISHER_ID APPS AD_UNIT_ID GCP_PROJECT GCS_BUCKET_NAME BQ_DATASET BQ_TABLE_NETWORK SLACK_WEBHOOK_URL; do
+            if [ -z "${!var}" ]; then
+              echo "❌ ERROR: $var is empty or not set!"
+              exit 1
+            fi
+          done
+
+      - name: Run Network Report + Native-CTR Alerts
+        run: python native_CTR_alerts.py
