@@ -338,11 +338,11 @@ def main():
     gcs_uri = upload_to_gcs(local_csv, BUCKET_NAME)
     load_csv_to_bq(gcs_uri, PROJECT, DATASET_NAME, TABLE_NAME, report_date)
 
-    # check_native_ctr_alert(
-    #     PROJECT, DATASET_NAME, TABLE_NAME,
-    #     report_date, SLACK_WEBHOOK_URL,
-    #     ad_unit_ids
-    # )
+    check_native_ctr_alert(
+        PROJECT, DATASET_NAME, TABLE_NAME,
+        report_date, SLACK_WEBHOOK_URL,
+        ad_unit_ids
+    )
 
 if __name__ == "__main__":
     main()
