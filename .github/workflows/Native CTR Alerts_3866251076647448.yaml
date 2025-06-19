@@ -2,8 +2,8 @@ name: 📊 Native CTR Alerts VPN
 
 on:
   schedule:
-    # Runs every hour per day - UTC
-    - cron: '0 * * * *'
+    # Runs twice a day at 00:00 UTC and 12:00 UTC
+    - cron: '0 0,12 * * *'
   workflow_dispatch:
     inputs:
       run_date:
